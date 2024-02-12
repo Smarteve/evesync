@@ -2,10 +2,8 @@ import socket
 import threading
 from queue import Queue
 
-from client import send_file
-
 host = "localhost"
-port = 9999
+port = 10000
 
 # requirement: multiple clients, but each client has one file and they are syncing the file
 # first client will send the file to the server
@@ -13,34 +11,45 @@ port = 9999
 
 
 client_list = []
+file_content = None
 
 
-def receive_file(client):
-    filename_length = int.from_bytes(client.recv(4), "big")
-    filename = client.recv(filename_length).decode()
+def handle_client(client):
+    global file_content
     content = b""
+    if len(client_list) == 1:
+        conn.send(b"GET\n")
+        file_size = int.from_bytes(client.recv(4), "big")
 
-    while True:
-        data = client.recv(1024)
-        if not data:
-            break
-        content += data
+        while True:
+            data = client.recv(1024)
+            if not data:
+                break
+            content += data
+        print(file_size)
+        print(len(content))
 
-    with open(filename, "wb") as f:
-        f.write(content)
+        if len(content) != file_size:
+            raise ValueError("file not completely received")
+        file_content = content
+    else:
+        if file_content is not None:
+            client.send(file_content)
 
-    return filename
 
-
-def broadcast_file(filename):
+def broadcast_update(file_content, conn):
     for client in client_list:
         if client != conn:
-            send_file(filename, client)
+            client.send(file_content)
 
 
 thread_queue = Queue()
 if __name__ == "__main__":
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(
+        socket.SOL_SOCKET, socket.SO_REUSEADDR, 1
+    )  # release the port immediately
+
     s.bind((host, port))
     s.listen()
     print("server is listening on port", port)
@@ -50,12 +59,7 @@ if __name__ == "__main__":
             conn, address = s.accept()
             print(address[0], "connected")
             client_list.append(conn)
-            if len(client_list) == 1:
-                conn.send(b"GET")
-                filename = receive_file(conn)
-                broadcast_file(filename)
-
-            t = threading.Thread(target=receive_file, args=(conn,))
+            t = threading.Thread(target=handle_client, args=(conn,))
             t.start()
             thread_queue.put(t)
         except KeyboardInterrupt:
