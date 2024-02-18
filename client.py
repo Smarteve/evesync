@@ -1,6 +1,8 @@
 import os
 import socket
 import sys
+import time
+import threading
 
 
 host = "localhost"
@@ -12,57 +14,69 @@ port = 10000
 # if any client made the change, server will sync the change to other clients
 
 
-def create_file(filename):
-    if not os.path.exists(filename):
-        with open(filename, "w") as f:
-            f.write(
-                "test"
-            )  # do i have to write something as a placeholder in creating a new file
-            print("file created")
-
 
 def send_file(filename, client):
     if os.path.exists(filename):
         with open(filename, "rb") as f:
             file_size = os.path.getsize(filename)
+            print(file_size)
             client.send(file_size.to_bytes(4, "big"))
-            chunk = f.read(1024)
-            while chunk:
-                client.send(chunk)
-                chunk = f.read(1024)
+            client.send(f.read())
 
     else:
-        print("file not found")
+        raise ValueError("file does not exist")
 
 
-def change_file(filename):
-    with open(filename, "w") as f:
-        f.write("change")
+def monitor_thread(filename,client) -> None:
+    last_modified_time = os.path.getmtime(filename)
+    while True:
+        current_modified_time = os.path.getmtime(filename)
+        if current_modified_time > last_modified_time:
+            client.send(b"UPDATE")
+            last_modified_time = current_modified_time
+            print("file updated")
+        time.sleep(1)
 
-
-# how can i change file, should user pass in command line arguement ?
-
+ 
 
 if __name__ == "__main__":
-    # first client send the file to the server, assume first client always provide a file
-    # rest client receive the file from the server
-
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect((host, port))
+    if len(sys.argv) < 2:
+        raise ValueError("please provide a file path")
+    filename = sys.argv[1]
     data = client.recv(1024).decode().strip()
     print(data)
-    if data == "GET":
-        if len(sys.argv) < 2:
-            raise ValueError("please provide a file path")
-        filename = sys.argv[1]
-        create_file(filename)
-        send_file(filename, client)
-        print("file sent successfully")
-    else:
-        client.send(b"file received\n")
+    if data == "FIRST":  #first client connects, the file should already exist
+        if not os.path.exists(filename):
+            raise ValueError("file does not exist")
+    
+    elif data == "NOT_FIRST": # rest clients connect, the file should not exist, waiting for the server to send the file content then update the file
+        if os.path.exists(filename):
+            raise ValueError("file already exist")
+        else:
+            file_content = client.recv(1024).decode().rstrip()
+            with open(filename, "w") as f:
+                f.write(file_content)
+            client.send(f"file saved as {filename}\n".encode())
+    # t = threading.Thread(target=monitor_thread, args=(filename,client))
+    # t.start()
+    while True:  # first and no first is one-time thing, after that, the client will be waiting for the server to send the file content, hence the while loop to keep the connection open
+        try:
+            data = client.recv(1024).decode().strip()
+            if data == "GET":    
+                send_file(filename, client)
+                print("file sent successfully")  
+            elif data == "SET":
+                ack = client.send(b"ACK\n")
+                file_content = client.recv(1024).decode().strip()
+                with open(filename, "w") as f:
+                    f.write(file_content)
+                print("file updated")
+        except KeyboardInterrupt:
+            break 
 
-        with open(
-            "/home/evelyn/Desktop/engineer/miniproject/evesync/received_file.txt", "w"
-        ) as f:
-            f.write(data)
-        client.send(b"file saved as received_file.txt\n")
+
+
+
+     

@@ -2,3 +2,4 @@
 /eve
 /eve.txt
 *.txt
+!readme.txt
