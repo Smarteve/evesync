@@ -2,9 +2,12 @@ import os
 import socket
 import sys
 import time
-import threading
 
 
+import utils
+
+
+# TODO: use command line arguments --host and --port
 host = "localhost"
 port = 10000
 
@@ -14,69 +17,63 @@ port = 10000
 # if any client made the change, server will sync the change to other clients
 
 
-
-def send_file(filename, client):
-    if os.path.exists(filename):
-        with open(filename, "rb") as f:
-            file_size = os.path.getsize(filename)
-            print(file_size)
-            client.send(file_size.to_bytes(4, "big"))
-            client.send(f.read())
-
-    else:
-        raise ValueError("file does not exist")
-
-
-def monitor_thread(filename,client) -> None:
-    last_modified_time = os.path.getmtime(filename)
-    while True:
-        current_modified_time = os.path.getmtime(filename)
-        if current_modified_time > last_modified_time:
-            client.send(b"UPDATE")
-            last_modified_time = current_modified_time
-            print("file updated")
-        time.sleep(1)
-
- 
-
-if __name__ == "__main__":
+def init_client(host: str, port: int, filename: str) -> socket.socket:
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect((host, port))
+
+    data = client.recv(1024).decode().strip()
+    print(data)
+    match data:
+        case "FIRST":  # first client connects, the file should already exist
+            if not os.path.exists(filename):
+                raise ValueError("file does not exist")
+        case (
+            "NOT_FIRST"
+        ):  # non-first clients connect, the file should not exist, waiting for the server to send the file content then update the file
+            if os.path.exists(filename):
+                raise ValueError("file already exist")
+            else:
+                file_content = utils.receive_file(client)
+                utils.write_file(file_content, filename)
+                client.send(f"file saved as {filename}\n".encode())
+        case _:
+            raise ValueError("unexpected response from server")
+    return client
+
+
+if __name__ == "__main__":
+    # validate command line arguments (always do as earliest as possible to avoid unnecessary work)
     if len(sys.argv) < 2:
         raise ValueError("please provide a file path")
     filename = sys.argv[1]
-    data = client.recv(1024).decode().strip()
-    print(data)
-    if data == "FIRST":  #first client connects, the file should already exist
-        if not os.path.exists(filename):
-            raise ValueError("file does not exist")
-    
-    elif data == "NOT_FIRST": # rest clients connect, the file should not exist, waiting for the server to send the file content then update the file
-        if os.path.exists(filename):
-            raise ValueError("file already exist")
-        else:
-            file_content = client.recv(1024).decode().rstrip()
-            with open(filename, "w") as f:
-                f.write(file_content)
-            client.send(f"file saved as {filename}\n".encode())
-    # t = threading.Thread(target=monitor_thread, args=(filename,client))
-    # t.start()
-    while True:  # first and no first is one-time thing, after that, the client will be waiting for the server to send the file content, hence the while loop to keep the connection open
-        try:
-            data = client.recv(1024).decode().strip()
-            if data == "GET":    
-                send_file(filename, client)
-                print("file sent successfully")  
-            elif data == "SET":
-                ack = client.send(b"ACK\n")
-                file_content = client.recv(1024).decode().strip()
-                with open(filename, "w") as f:
-                    f.write(file_content)
+
+    client = init_client(host, port, filename)
+    last_modified_time = os.path.getmtime(filename)
+    while True:
+        # non blocking call to check if there is data to be read.
+        # This is done so we can use the thread time to check for file updates.
+        data = utils.try_receive(client)
+
+        if data == "GET":
+            file_content = utils.read_file(filename)
+            utils.send_file(file_content, client)
+            print("file sent successfully")
+        elif data == "SET":
+            ack = client.send(b"ACK\n")
+            file_content = utils.receive_file(client)
+            utils.write_file(file_content, filename)
+            print("file updated")
+
+        # file update check
+        if (
+            data != "SET"
+        ):  # when noone changes the file, client didnt recv anything from the server, try_receive gets none, it will come to this block and continously to check if there the file has been modified
+            current_modified_time = os.path.getmtime(filename)
+            if current_modified_time > last_modified_time:
+                client.send(b"UPDATE")
+                last_modified_time = current_modified_time
                 print("file updated")
-        except KeyboardInterrupt:
-            break 
+        else:
+            last_modified_time = os.path.getmtime(filename)
 
-
-
-
-     
+        time.sleep(5)

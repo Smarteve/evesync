@@ -1,56 +1,63 @@
 import socket
 import threading
-from queue import Queue
 import random
+import time
 
+import utils
+
+# TODO: use command line arguments --host and --port
 host = "localhost"
 port = 10000
 
 
-client_list = []
+CLIENTS = []
+LOCKS = {}
 
-def handle_client(client):
-    if len(client_list) == 0:
+
+def init_client(client):
+    if not CLIENTS:
         client.send(b"FIRST\n")
-        client_list.append(client)
-
     else:
         client.send(b"NOT_FIRST\n")
-        random_client = random.choice(client_list)
-        random_client.send(b"GET\n") #get the file from a random client before this newly joined client
-        file_content = receive_file(random_client)
-        client.send(file_content)
+        random_client = random.choice(CLIENTS)
+        with LOCKS[random_client]:
+            random_client.send(
+                b"GET\n"
+            )  # get the file from a random client before this newly joined client
+            file_content = utils.receive_file(random_client)
+        utils.send_file(file_content, client)
         ack = client.recv(1024).decode().strip()
         print(ack)
-        client_list.append(client)
-    
-    while True: # have a while loop to keep the connection open
-        pass
-        # message = client.recv(1024).decode().strip()
-        # if message == "UPDATE":
-        #     client.send(b"GET\n")
-        #     file_content = receive_file(client)
-        #     broadcast_update(file_content, client)
+    CLIENTS.append(client)
 
+
+def handle_client(client):
+    with LOCKS[
+        client
+    ]:  # ensure a connection is only used by a single thread at a given time
+        init_client(client)
+
+    while True:  # have a while loop to keep the connection open
+        with LOCKS[client]:
+            message = utils.try_receive(client)
+            if message == "UPDATE":
+                client.send(b"GET\n")
+                file_content = utils.receive_file(client)
+                broadcast_update(file_content, client)
+        time.sleep(5)
 
 
 def broadcast_update(file_content, conn):
-    for client in client_list:
+    print("Broadcasting update")
+    for client in CLIENTS:
         if client != conn:
-            client.send(b"SET\n")
-            message = client.recv(1024).decode().strip()
-            if message == "ACK":
-                client.send(file_content)
+            with LOCKS[client]:
+                client.send(b"SET\n")
+                message = client.recv(1024).decode().strip()
+                if message == "ACK":
+                    utils.send_file(file_content, client)
 
-def receive_file(conn: socket.socket) -> bytes:
-    print("receiving file")
-    file_size = int.from_bytes(conn.recv(4),"big")
-    print(file_size)
-    content = conn.recv(file_size)
-    print(content)
-    return content
 
-thread_queue = Queue()
 if __name__ == "__main__":
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(
@@ -66,7 +73,8 @@ if __name__ == "__main__":
             conn, address = s.accept()
             print(address[0], "connected")
             t = threading.Thread(target=handle_client, args=(conn,))
+            LOCKS[conn] = threading.Lock()
+            print(f"Starting thread {t.name}")
             t.start()
-            thread_queue.put(t)
         except KeyboardInterrupt:
             break
