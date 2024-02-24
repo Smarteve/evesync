@@ -71,7 +71,6 @@ if __name__ == "__main__":
             current_modified_time = os.path.getmtime(filename)
             if current_modified_time > last_modified_time:
                 client.send(b"UPDATE")
-                last_modified_time = current_modified_time
                 print("file updated")
         else:
             last_modified_time = os.path.getmtime(filename)

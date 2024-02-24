@@ -6,7 +6,7 @@ import time
 import utils
 
 # TODO: use command line arguments --host and --port
-host = "localhost"
+host = "0.0.0.0"
 port = 10000
 
 
