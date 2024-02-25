@@ -22,10 +22,11 @@ def init_client(client):
         random_client = random.choice(CLIENTS)
         with LOCKS[random_client]:
             random_client.send(
-                b"GET\n"
-            )  # get the file from a random client before this newly joined client
-            file_content = utils.receive_file(random_client)
-        utils.send_file(file_content, client)
+                b"GET FOLDER\n"
+            )  # get the file dict binary content from a random client before this newly joined client
+            folder_content = random_client.recv(1024)
+
+        client.send(folder_content)
         ack = client.recv(1024).decode().strip()
         print(ack)
     CLIENTS.append(client)
@@ -40,22 +41,43 @@ def handle_client(client):
     while True:  # have a while loop to keep the connection open
         with LOCKS[client]:
             message = utils.try_receive(client)
-            if message == "UPDATE":
-                client.send(b"GET\n")
-                file_content = utils.receive_file(client)
-                broadcast_update(file_content, client)
+            match message:
+                case "UPDATE":
+                    client.send(b"ACK\n")
+                    binary_dict = client.recv(1024)
+                    print(binary_dict)
+                    broadcast_update(binary_dict, client)
+                case "DELETE":
+                    client.send(b"ACK\n")
+                    file_name = client.recv(1024).decode().strip()
+                    broadcast_delete(file_name, client)
+
         time.sleep(5)
 
 
-def broadcast_update(file_content, conn):
-    print("Broadcasting update")
+def broadcast_delete(file_name, conn):
+    print("Broadcasting delete")
     for client in CLIENTS:
         if client != conn:
             with LOCKS[client]:
+                client.send(b"DELETE\n")
+                message = client.recv(1024).decode().strip()
+                if message == "ACK":
+                    client.send(file_name.encode())
+                    print("Deleted file sent to client")
+
+
+def broadcast_update(binary_dict, conn):
+    print("Broadcasting update")
+    for client in CLIENTS:
+        if client != conn:
+            print(client)
+            with LOCKS[client]:
+                print("acquired lock")
                 client.send(b"SET\n")
                 message = client.recv(1024).decode().strip()
                 if message == "ACK":
-                    utils.send_file(file_content, client)
+                    client.send(binary_dict)
 
 
 if __name__ == "__main__":
