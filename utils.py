@@ -1,13 +1,46 @@
+import enum
 import socket
 import os
 import pickle
+from typing import Any
+
+from dataclasses import dataclass
+
+
+class MessageType(enum.Enum):
+    UPDATE = "UPDATE"
+    NOT_FIRST = "NOT_FIRST"
+    FIRST = "FIRST"
+    DELETE = "DELETE"
+    GET = "GET"
+
+
+@dataclass
+class Message:
+    type: str
+    body: Any = None
+
+
+def request(conn: socket.socket, message: Message | str) -> Message:
+    send_message(conn, message)
+    return receive_message(conn)
+
+
+def receive_message(conn: socket.socket) -> Message:
+    data = conn.recv(1024)
+    return pickle.loads(data)
+
+
+def send_message(conn: socket.socket, message: Message):
+    data = pickle.dumps(message)
+    conn.send(data)
 
 
 def try_receive(conn: socket.socket) -> str | None:
     """Try to receive data from a socket. If there is nothing available, return None."""
     conn.setblocking(False)
     try:
-        return conn.recv(1024).decode().strip()
+        return receive_message(conn)
     except BlockingIOError:
         return None
     finally:
@@ -29,9 +62,7 @@ def send_folder(folder_path: str, conn: socket.socket):
     # set up a dictionary of key file name, value file content
     # sending the dictionary to server via pickle
     files_dict = set_dict(folder_path)
-    print(files_dict)
-    data = pickle.dumps(files_dict)
-    conn.send(data)
+    send_message(conn, files_dict)
 
 
 def receive_folder(conn: socket.socket):
