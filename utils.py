@@ -6,6 +6,9 @@ from typing import Any
 
 from dataclasses import dataclass
 
+# set a Message class where message.type is command, message.body is content(file or folder) to be transferred
+# using enum in setting up message.type to avoid hardcode protocal
+
 
 class MessageType(enum.Enum):
     UPDATE = "UPDATE"
@@ -26,6 +29,7 @@ def request(conn: socket.socket, message: Message | str) -> Message:
     return receive_message(conn)
 
 
+# using pickle to dumps and loads the Message object
 def receive_message(conn: socket.socket) -> Message:
     data = conn.recv(1024)
     return pickle.loads(data)

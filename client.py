@@ -11,6 +11,8 @@ host = "localhost"
 port = 10000
 
 LOCKS = {}
+MessageType = utils.MessageType
+Message = utils.Message
 
 
 def init_client(host: str, port: int, folder_path: str) -> socket.socket:
@@ -19,10 +21,10 @@ def init_client(host: str, port: int, folder_path: str) -> socket.socket:
     data = utils.receive_message(client)
     print(data)
     match data.type:
-        case utils.MessageType.FIRST:  # first client connects, do nothing
+        case MessageType.FIRST:  # first client connects, do nothing
             pass
         case (
-            utils.MessageType.NOT_FIRST
+            MessageType.NOT_FIRST
         ):  # non-first clients connect, receive folder dict from source client
             utils.write_folder(folder_path, data.body)
             print("folder received")
@@ -45,23 +47,20 @@ def monitor_folder(
                     if file_name not in dir_content:
                         utils.send_message(
                             client,
-                            utils.Message(
-                                type=utils.MessageType.DELETE, body=file_name
-                            ),
+                            Message(type=MessageType.DELETE, body=file_name),
                         )
                         print("Deleted file sent")
                         del mtime_dict[file_name]
-
+            # if a file is updated or new file created
             else:
                 for file_name in dir_content:
-                    # check if new file has been created:
                     file_path = os.path.join(folder_path, file_name)
                     if (
                         file_name not in mtime_dict
                         or os.path.getmtime(file_path) > mtime_dict[file_name]
                     ):
-                        update_msg = utils.Message(
-                            type=utils.MessageType.UPDATE,
+                        update_msg = Message(
+                            type=MessageType.UPDATE,
                             body={
                                 "file_name": file_name,
                                 "file_content": utils.read_file(file_path),
@@ -78,8 +77,8 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise ValueError("please provide a folder path")
     folder_path = sys.argv[1]
-    des_file_dict = utils.set_dict(folder_path)
     client = init_client(host, port, folder_path)
+    des_file_dict = utils.set_dict(folder_path)
     mtime_dict = {
         file: os.path.getmtime(os.path.join(folder_path, file))
         for file in os.listdir(folder_path)
@@ -101,22 +100,20 @@ if __name__ == "__main__":
             time.sleep(5)
             continue
 
-        if data.type == utils.MessageType.GET:
+        if data.type == MessageType.GET:
             utils.send_folder(folder_path, client)
             print("folder sent successfully")
-        elif data.type == utils.MessageType.UPDATE:
+        elif data.type == MessageType.UPDATE:
             file_name = data.body["file_name"]
             file_content = data.body["file_content"]
             file_path = os.path.join(folder_path, file_name)
-            print(f"file content is {file_content}")
             utils.write_file(file_content, file_path)
             mtime_dict[file_name] = os.path.getmtime(file_path)
             print(f"{file_name} updated")
-        elif data.type == utils.MessageType.DELETE:
+        elif data.type == MessageType.DELETE:
             os.remove(os.path.join(folder_path, data.body))
             del mtime_dict[file_name]
             print("file deleted")
 
         des_files_dict = utils.set_dict(folder_path)
-
         time.sleep(5)

@@ -14,22 +14,23 @@ CLIENTS = []
 LOCKS = {}
 
 MessageType = utils.MessageType
+Message = utils.Message
 
 
 def init_client(client):
     if not CLIENTS:
-        utils.send_message(client, utils.Message(type=MessageType.FIRST))
+        utils.send_message(client, Message(type=MessageType.FIRST))
     else:
         random_client = random.choice(CLIENTS)
         with LOCKS[random_client]:
             print("Requesting folder content from", random_client)
             folder_content = utils.request(
-                random_client, utils.Message(type=MessageType.GET)
+                random_client, Message(type=MessageType.GET)
             )  # get the file dict binary content from a random client before this newly joined client
             print("Received")
 
         utils.send_message(
-            client, utils.Message(type=MessageType.NOT_FIRST, body=folder_content)
+            client, Message(type=MessageType.NOT_FIRST, body=folder_content)
         )
     CLIENTS.append(client)
 
